@@ -1,0 +1,149 @@
+{% extends "admin/base.html" %}
+{% block main %}
+<div class="monitor-container">
+    <h2 class="monitor-title">🚀 System Live Monitor</h2>
+
+    <div class="stat-grid">
+        <div class="stat-card">
+            <div class="stat-label">CPU</div>
+            <div id="cpu_val" class="stat-value">0%</div>
+            <div class="progress-bg"><div id="cpu_bar" class="progress-fill cpu-color"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">RAM</div>
+            <div id="ram_val" class="stat-value">0%</div>
+            <div class="progress-bg"><div id="ram_bar" class="progress-fill ram-color"></div></div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Disk</div>
+            <div id="disk_val" class="stat-value">0%</div>
+            <div class="progress-bg"><div id="disk_bar" class="progress-fill disk-color"></div></div>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="chart-header">
+            <span>🌐 Network I/O</span>
+            <div class="net-speeds">
+                <span style="color: #89b4fa">⬇ <span id="down_speed">0</span> KB/s</span>
+                <span style="color: #f5c2e7; margin-left: 15px;">⬆ <span id="up_speed">0</span> KB/s</span>
+            </div>
+        </div>
+        <div class="chart-container">
+            <canvas id="netChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<style>
+/* 颜色与边栏对齐 (#2d3436 或 #1e1e2e) */
+.monitor-container {
+    padding: 10px;
+    animation: fadeIn 0.5s ease;
+}
+.monitor-title {
+    color: #2d3436;
+    font-size: 1.5rem;
+    margin-bottom: 20px;
+}
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 15px;
+}
+.stat-card {
+    background: #34495e; /* 与侧边栏色系接近 */
+    padding: 15px;
+    border-radius: 12px;
+    color: white;
+    text-align: center;
+}
+.stat-label { font-size: 0.8rem; opacity: 0.8; margin-bottom: 5px; }
+.stat-value { font-size: 1.6rem; font-weight: bold; margin-bottom: 10px; }
+
+/* 进度条样式 */
+.progress-bg { background: rgba(255,255,255,0.1); height: 6px; border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; width: 0%; transition: width 0.5s ease; }
+.cpu-color { background: #ff7675; }
+.ram-color { background: #55efc4; }
+.disk-color { background: #74b9ff; }
+
+/* 图表卡片 */
+.chart-card {
+    background: #2d3436;
+    padding: 20px;
+    border-radius: 12px;
+    color: white;
+}
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+.chart-container {
+    position: relative;
+    height: 180px; /* 强制压缩高度，防止下滑过久 */
+    width: 100%;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const ctx = document.getElementById('netChart').getContext('2d');
+    const netChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: Array(30).fill(''),
+            datasets: [
+                { label: 'Down', data: Array(30).fill(0), borderColor: '#89b4fa', borderWidth: 2, fill: true, backgroundColor: 'rgba(137,180,250,0.1)', tension: 0.4, pointRadius: 0 },
+                { label: 'Up', data: Array(30).fill(0), borderColor: '#f5c2e7', borderWidth: 2, fill: true, backgroundColor: 'rgba(245,194,231,0.1)', tension: 0.4, pointRadius: 0 }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a6adc8', font: { size: 10 } } },
+                x: { display: false }
+            }
+        }
+    });
+
+    let lastNet = { sent: 0, recv: 0, time: Date.now() };
+
+    async function update() {
+        try {
+            const res = await fetch('/api/sys_stats');
+            const data = await res.json();
+            
+            document.getElementById('cpu_val').innerText = Math.round(data.cpu) + '%';
+            document.getElementById('cpu_bar').style.width = data.cpu + '%';
+            document.getElementById('ram_val').innerText = Math.round(data.ram) + '%';
+            document.getElementById('ram_bar').style.width = data.ram + '%';
+            document.getElementById('disk_val').innerText = Math.round(data.disk) + '%';
+            document.getElementById('disk_bar').style.width = data.disk + '%';
+
+            const now = Date.now();
+            const duration = (now - lastNet.time) / 1000;
+            const upSpeed = ((data.net_sent - lastNet.sent) / 1024 / duration).toFixed(1);
+            const downSpeed = ((data.net_recv - lastNet.recv) / 1024 / duration).toFixed(1);
+            
+            document.getElementById('up_speed').innerText = upSpeed;
+            document.getElementById('down_speed').innerText = downSpeed;
+            lastNet = { sent: data.net_sent, recv: data.net_recv, time: now };
+
+            netChart.data.datasets[0].data.shift();
+            netChart.data.datasets[0].data.push(downSpeed);
+            netChart.data.datasets[1].data.shift();
+            netChart.data.datasets[1].data.push(upSpeed);
+            netChart.update('none');
+        } catch (e) {}
+    }
+    setInterval(update, 2000);
+</script>
+{% endblock %}

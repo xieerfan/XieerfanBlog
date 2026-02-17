@@ -1,0 +1,16 @@
+{% extends "admin/base.html" %}
+{% block main %}
+<h2>博文列表</h2>
+<div style="display: grid; gap: 15px;">
+    {% for post in posts %}
+    <div style="display: flex; align-items: center; padding: 15px; border-bottom: 1px solid #eee;">
+        <img src="{{ url_for('static', filename='uploads/' + (post.thumbnail or '')) }}" width="80" style="border-radius: 8px;">
+        <div style="flex:1; margin-left: 20px;">
+            <div style="font-weight: bold;">{{ post.title }}</div>
+            <div style="color: #999; font-size: 12px;">{{ post.date_posted.strftime('%Y-%m-%d') }}</div>
+        </div>
+        <a href="{{ url_for('delete_post', post_id=post.id) }}" style="color: #ff7675; text-decoration: none;">删除</a>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
