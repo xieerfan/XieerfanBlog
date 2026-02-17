@@ -8,9 +8,15 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
 dist-ssr
 *.local
+
+# 忽略本地环境变量
+.env
+.env.local
+# 忽略依赖和构建产物
+node_modules/
+dist/
 
 # Editor directories and files
 .vscode/*

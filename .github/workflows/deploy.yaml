@@ -1,0 +1,42 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          # 注意：这里也需要指定缓存文件的位置
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Restore Real API URL
+        run: |
+          echo "🔄 Replacing GITHUB-SC with real API URL..."
+          # 扫描范围锁定在 ui 目录下
+          find ui -type f -name "*.vue" -print0 | xargs -0 sed -i "s|GITHUB-SC|${{ secrets.API_BASE_URL }}|g"
+
+      - name: Install & Build
+        # 设置工作目录为 ui
+        working-directory: ./ui
+        run: |
+          npm install
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          # 核心修改：指定部署目录为 ui/dist
+          command: pages deploy ui/dist --project-name=xieerfan-blog

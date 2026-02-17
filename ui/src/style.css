@@ -1,17 +1,9 @@
-/* 清除所有默认边距，确保撑满全屏 */
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  margin: 0;
-  min-width: 100vw;
-  min-height: 100vh;
-  background-color: #fff;
-}
-
-#app {
-  width: 100%;
-  max-width: none;
+html, body {
   margin: 0;
   padding: 0;
-  text-align: left;
+  width: 100%;
+  min-height: 100vh;
+  /* 允许滚动，但隐藏 X 轴溢出防止左右乱晃 */
+  overflow-x: hidden; 
+  overflow-y: auto;
 }

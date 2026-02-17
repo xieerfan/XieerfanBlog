@@ -1,0 +1,14 @@
+# 忽略依赖
+node_modules/
+.wrangler/
+.dev.vars
+dist/
+
+# 忽略 UI 目录下的构建产物和依赖
+ui/node_modules/
+ui/dist/
+
+# 忽略个人私密文件
+README.pdf
+build.sh
+*.log
