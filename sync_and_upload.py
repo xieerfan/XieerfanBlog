@@ -17,7 +17,7 @@ PUBLIC_DOMAIN = API_URL.replace("/api", "").rstrip("/") + "/img"
 
 # 初始化 R2
 s3 = boto3.client("s3",
-    endpoint_url=f"https://{CF_ACCOUNT_ID}.r2.cloudflarestorage.com",
+    endpoint_url=f"https://{ACCOUNT_ID}.r2.cloudflarestorage.com",
     aws_access_key_id=R2_ACCESS_KEY,
     aws_secret_access_key=R2_SECRET_KEY,
     region_name="auto"
@@ -25,15 +25,21 @@ s3 = boto3.client("s3",
 
 def sql_escape(text):
     if not text: return ""
+    # 严格转义单引号，防止 SQL 注入或格式错误
     return str(text).replace("'", "''")
 
 def run_sql(db, sql):
-    # 打印 SQL 调试信息（脱敏内容）
-    print(f"执行 SQL 对应数据库: {db}")
+    # 显式注入环境变量，防止 wrangler 找不到账号
+    env = os.environ.copy()
+    env["CLOUDFLARE_ACCOUNT_ID"] = ACCOUNT_ID
+    
     cmd = ["npx", "wrangler", "d1", "execute", db, "--remote", "--json", f"--command={sql}"]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    
     if res.returncode != 0:
-        print(f"❌ SQL 执行报错: {res.stderr}")
+        print(f"❌ D1 执行失败: {res.stderr}")
+    else:
+        print(f"✔️ SQL 执行成功")
     return res.stdout
 
 def get_id_from_json(json_str):
@@ -51,6 +57,7 @@ def upload_to_r2(local_path, category):
         ext = file_name.lower().split('.')[-1]
         content_type = "image/png" if ext == "png" else "image/jpeg"
         s3.upload_file(local_path, R2_BUCKET, remote_key, ExtraArgs={'ContentType': content_type})
+        print(f"  🖼️ 图片已同步 R2: {remote_key}")
         return f"{PUBLIC_DOMAIN}/{remote_key}"
     except Exception as e:
         print(f"  ❌ R2 上传失败: {e}")
@@ -59,13 +66,10 @@ def upload_to_r2(local_path, category):
 def process_sync(category):
     base_dir = f"./{category}"
     db_name = f"xieerfan-{category}"
-    if not os.path.exists(base_dir):
-        print(f"⚠️ 目录 {base_dir} 不存在，跳过")
-        return
+    if not os.path.exists(base_dir): return
 
-    # 获取目录下所有 md
     files = [f for f in os.listdir(base_dir) if f.endswith(".md")]
-    print(f"找到 {len(files)} 个文件在 {category}")
+    print(f"🚀 开始同步 {category} 分支，共 {len(files)} 个文件")
 
     for filename in files:
         path = os.path.join(base_dir, filename)
@@ -83,25 +87,25 @@ def process_sync(category):
             return match.group(0)
 
         new_content = re.sub(img_pattern, replacer, post.content)
-        # 重点：确保 title 严格一致（去除首尾空格）
         title = sql_escape(post.get('title', filename.replace('.md', '')).strip())
         safe_content = sql_escape(new_content.strip())
 
         if category == "blog":
-            # 增加对 ID 的判断或依靠 UNIQUE(title)
+            # 修正：显式指定字段名，确保与你表结构一致
             sql = f"""
-            INSERT OR REPLACE INTO posts (title, category, post_type, language, content, thumb_url)
-            VALUES ('{title}', '{post.get('category','thoughts')}', '{post.get('post_type','')}', 
-            '{post.get('language','')}', '{safe_content}', '{post.get('thumb', 'backgrounds/wall1.jpg')}');
+            INSERT OR REPLACE INTO posts (title, category, post_type, language, is_open_source, project_name, content, thumb_url, date)
+            VALUES ('{title}', '{sql_escape(post.get('category','thoughts'))}', '{sql_escape(post.get('post_type',''))}', 
+            '{sql_escape(post.get('language',''))}', {1 if post.get('open_source') else 0}, '{sql_escape(post.get('project',''))}', 
+            '{safe_content}', '{sql_escape(post.get('thumb', 'backgrounds/wall1.jpg'))}', CURRENT_TIMESTAMP);
             """
             run_sql(db_name, sql)
         else:
             # Wiki 逻辑
-            parent_title = post.get('parent_title')
+            parent_title = sql_escape(str(post.get('parent_title', '')).strip())
             p_id = 0
             if parent_title:
-                run_sql(db_name, f"INSERT OR IGNORE INTO wiki_nodes (title, parent_id) VALUES ('{sql_escape(parent_title.strip())}', 0)")
-                p_res = run_sql(db_name, f"SELECT id FROM wiki_nodes WHERE title = '{sql_escape(parent_title.strip())}' LIMIT 1")
+                run_sql(db_name, f"INSERT OR IGNORE INTO wiki_nodes (title, parent_id) VALUES ('{parent_title}', 0)")
+                p_res = run_sql(db_name, f"SELECT id FROM wiki_nodes WHERE title = '{parent_title}' LIMIT 1")
                 p_id = get_id_from_json(p_res) or 0
             
             run_sql(db_name, f"INSERT OR REPLACE INTO wiki_nodes (title, parent_id, has_content) VALUES ('{title}', {p_id}, 1)")
@@ -110,7 +114,7 @@ def process_sync(category):
             if curr_id:
                 run_sql(db_name, f"INSERT OR REPLACE INTO wiki_contents (node_id, content) VALUES ({curr_id}, '{safe_content}')")
         
-        print(f"✅ 同步完成: {title}")
+        print(f"✨ 同步成功: {title}")
 
 if __name__ == "__main__":
     process_sync("blog")
