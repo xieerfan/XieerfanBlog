@@ -1,0 +1,30 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "xieerfan-blog-worker"
+# 指向根目录下的 index.js
+main = "index.js" 
+compatibility_date = "2026-02-17"
+
+
+# 1. 绑定 R2 存储桶 (注意：binding 建议用下划线，和代码调用一致)
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "xieerfan-assets"
+
+
+# 2. 绑定第一个 D1 数据库 (Blog)
+[[d1_databases]]
+binding = "BLOG_DB"
+database_name = "xieerfan-blog"
+database_id = "c843e2fa-c9ac-447c-8ed4-6c23ff014bb0"
+
+
+# 3. 绑定第二个 D1 数据库 (Wiki)
+[[d1_databases]]
+binding = "WIKI_DB"
+database_name = "xieerfan-wiki"
+database_id = "7badd5d6-47f1-48b3-aa74-ced673c07803"
+
+
+# 4. 配置 Pages 静态资源目录（如果 Vue 打包后在 dist）
+[pages_build_output_dir]
+directory = "dist"
