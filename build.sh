@@ -1,68 +1,64 @@
 #!/bin/bash
 
-# --- 1. 配置区 ---
-# 请确保你的 SSH Key 已经添加到 GitHub，或者这里的 URL 改成带 Token 的 HTTPS 链接
 REPO_URL="git@github.com:xieerfan/XieerfanBlog.git"
+CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
 
-# --- 2. 图片处理函数 ---
-process_md_files() {
+# --- 图片预处理函数 ---
+process_images() {
     local dir=$1
     if [ ! -d "$dir" ]; then return; fi
-    echo "🔍 正在扫描 $dir 文件夹下的图片引用..."
     mkdir -p "$dir/images"
-
     find "$dir" -maxdepth 1 -name "*.md" | while read -r md_file; do
-        # 匹配 ![alt](local_path)
         grep -oE '!\[.*\]\([^)]+\)' "$md_file" | while read -r img_tag; do
-            # 提取括号内的路径
             original_path=$(echo "$img_tag" | sed -E 's/.*(\((.*)\))/\2/')
-            
-            # 如果是本地路径且文件存在，则搬运
             if [[ "$original_path" != images/* ]] && [[ "$original_path" != http* ]] && [[ -f "$original_path" ]]; then
                 file_name=$(basename "$original_path")
-                target_path="$dir/images/$file_name"
-                echo "🚚 搬运图片: $file_name"
-                cp "$original_path" "$target_path"
-                # 修正 MD 里的路径
+                cp "$original_path" "$dir/images/$file_name"
                 sed -i "s@$original_path@images/$file_name@g" "$md_file"
             fi
         done
     done
 }
 
-# --- 3. 执行图片预处理 ---
-process_md_files "blog"
-process_md_files "wiki"
+# 执行预处理
+process_images "blog"
+process_images "wiki"
 
-# --- 4. 强制推送逻辑 ---
-CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-
-sync_branch() {
+# --- 核心：分发同步函数 ---
+sync_to_branch() {
     local branch=$1
     local folder=$2
     
-    # 检查文件夹是否有变动
-    if [[ -n $(git status --porcelain "$folder/") ]]; then
-        echo "📝 检测到 $folder 变动，正在强制推送至 $branch..."
-        
-        # 保存当前分支名，防止切不回来
-        local original_branch=$(git rev-parse --abbrev-ref HEAD)
-
-        # 暴力操作：直接把当前目录暂存，然后推送到目标分支
-        git add .
-        git commit -m "$folder update: $CURRENT_TIME"
-        
-        # 核心：直接向远程仓库的对应分支强行推送当前 HEAD
-        git push "$REPO_URL" HEAD:refs/heads/"$branch" -f
-        
-        echo "✅ $branch 推送成功！"
-    else
-        echo "🍃 $folder 无变动，跳过。"
-    fi
+    echo "📦 准备同步 $folder 到 $branch..."
+    
+    # 1. 临时存放当前所有改动
+    git add .
+    git commit -m "temp commit for sync"
+    
+    # 2. 创建一个纯净的孤立分支镜像 (或者直接从当前切出)
+    # 这一步确保分支里包含：该文件夹 + 同步脚本 + CI配置
+    git checkout -b "deploy-$branch"
+    
+    # 只保留必要文件：对应文件夹、Python脚本、CI配置
+    # 先删掉所有不需要的东西（仅在临时分支操作）
+    git rm -rf . > /dev/null
+    git checkout HEAD -- "$folder/"
+    git checkout HEAD -- "sync_and_upload.py"
+    git checkout HEAD -- ".github/workflows/sync.yaml"
+    
+    git add .
+    git commit --amend -m "$folder update: $CURRENT_TIME"
+    
+    # 3. 强行发射！
+    git push "$REPO_URL" "deploy-$branch":"$branch" -f
+    
+    # 4. 切回原分支并清理本地临时分支
+    git checkout -
+    git branch -D "deploy-$branch"
 }
 
-# 执行同步
-sync_branch "blog-branch" "blog"
-sync_branch "wiki-branch" "wiki"
+# 只要有文件改动就同步
+sync_to_branch "blog-branch" "blog"
+sync_to_branch "wiki-branch" "wiki"
 
-echo "✨ 全部操作完成！快去 GitHub Actions 页面盯着进度条喵~"
+echo "✨ 配置文件已同步到各分支，现在 GitHub Actions 应该能看到任务了喵！"
