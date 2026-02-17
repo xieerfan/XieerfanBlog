@@ -37,3 +37,4 @@ jobs:
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
           API_BASE_URL: ${{ secrets.API_BASE_URL }}
         run: python sync_and_upload.py
+

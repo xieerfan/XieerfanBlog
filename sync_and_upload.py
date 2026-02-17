@@ -4,20 +4,19 @@ import boto3
 import frontmatter
 import subprocess
 import json
-import sys
 
-# --- 配置 ---
+# --- 环境变量配置 (严格对应你的 GitHub Secrets) ---
 CF_ACCOUNT_ID = os.getenv("CF_ACCOUNT_ID")
 R2_ACCESS_KEY = os.getenv("R2_ACCESS_KEY")
 R2_SECRET_KEY = os.getenv("R2_SECRET_KEY")
 R2_BUCKET = "xieerfan-assets"
 API_URL = os.getenv("API_BASE_URL", "")
-# 确保 URL 结尾没有多余斜杠
+# 确保 URL 结尾处理干净
 PUBLIC_DOMAIN = API_URL.replace("/api", "").rstrip("/") + "/img"
 
-# 初始化 R2
+# 初始化 R2 (注意这里使用 CF_ACCOUNT_ID)
 s3 = boto3.client("s3",
-    endpoint_url=f"https://{ACCOUNT_ID}.r2.cloudflarestorage.com",
+    endpoint_url=f"https://{CF_ACCOUNT_ID}.r2.cloudflarestorage.com",
     aws_access_key_id=R2_ACCESS_KEY,
     aws_secret_access_key=R2_SECRET_KEY,
     region_name="auto"
@@ -25,19 +24,18 @@ s3 = boto3.client("s3",
 
 def sql_escape(text):
     if not text: return ""
-    # 严格转义单引号，防止 SQL 注入或格式错误
     return str(text).replace("'", "''")
 
 def run_sql(db, sql):
-    # 显式注入环境变量，防止 wrangler 找不到账号
+    # 显式传递 Account ID 给 wrangler 防止其读取不到环境
     env = os.environ.copy()
-    env["CLOUDFLARE_ACCOUNT_ID"] = ACCOUNT_ID
+    env["CLOUDFLARE_ACCOUNT_ID"] = CF_ACCOUNT_ID
     
     cmd = ["npx", "wrangler", "d1", "execute", db, "--remote", "--json", f"--command={sql}"]
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     
     if res.returncode != 0:
-        print(f"❌ D1 执行失败: {res.stderr}")
+        print(f"❌ D1 执行报错: {res.stderr}")
     else:
         print(f"✔️ SQL 执行成功")
     return res.stdout
@@ -57,7 +55,7 @@ def upload_to_r2(local_path, category):
         ext = file_name.lower().split('.')[-1]
         content_type = "image/png" if ext == "png" else "image/jpeg"
         s3.upload_file(local_path, R2_BUCKET, remote_key, ExtraArgs={'ContentType': content_type})
-        print(f"  🖼️ 图片已同步 R2: {remote_key}")
+        print(f"  🖼️ R2 上传完成: {remote_key}")
         return f"{PUBLIC_DOMAIN}/{remote_key}"
     except Exception as e:
         print(f"  ❌ R2 上传失败: {e}")
@@ -69,14 +67,14 @@ def process_sync(category):
     if not os.path.exists(base_dir): return
 
     files = [f for f in os.listdir(base_dir) if f.endswith(".md")]
-    print(f"🚀 开始同步 {category} 分支，共 {len(files)} 个文件")
+    print(f"🚀 正在处理 {category} 分支，共 {len(files)} 个文件")
 
     for filename in files:
         path = os.path.join(base_dir, filename)
         with open(path, 'r', encoding='utf-8') as f:
             post = frontmatter.load(f)
         
-        # 路径替换
+        # 路径替换逻辑
         img_pattern = r'!\[(.*?)\]\((images/.+?)\)'
         def replacer(match):
             rel_img_path = match.group(2)
@@ -91,7 +89,7 @@ def process_sync(category):
         safe_content = sql_escape(new_content.strip())
 
         if category == "blog":
-            # 修正：显式指定字段名，确保与你表结构一致
+            # 完整匹配你的 D1 posts 表结构
             sql = f"""
             INSERT OR REPLACE INTO posts (title, category, post_type, language, is_open_source, project_name, content, thumb_url, date)
             VALUES ('{title}', '{sql_escape(post.get('category','thoughts'))}', '{sql_escape(post.get('post_type',''))}', 
@@ -114,7 +112,7 @@ def process_sync(category):
             if curr_id:
                 run_sql(db_name, f"INSERT OR REPLACE INTO wiki_contents (node_id, content) VALUES ({curr_id}, '{safe_content}')")
         
-        print(f"✨ 同步成功: {title}")
+        print(f"✅ 处理完成: {title}")
 
 if __name__ == "__main__":
     process_sync("blog")
