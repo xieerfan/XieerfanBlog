@@ -1,7 +1,7 @@
 ---
 title: "关于CBT/DBT/正念/MI的学习笔记"
-category: "growth"     
-post_type: "original"
+category: "programming"     
+post_type: "experience"
 language: "psychology"     
 is_open_source: 1         
 project_name: "Self-Healing"
