@@ -131,46 +131,63 @@ export default {
     }
   },
 
-  // --- 邮件处理函数：自动留言板逻辑 ---
-  async email(message, env) {
-    const sender = message.from;
-    const subject = message.headers.get("subject") || "无主题";
-    const raw = await new Response(message.raw).text();
+async email(message, env) {
+  const sender = message.from;
+  const subject = message.headers.get("subject") || "无主题";
+  const raw = await new Response(message.raw).text();
 
-    let cleanContent = "";
+  // --- 1. 简易 MIME 提取逻辑 ---
+  function getMessageBody(rawMail) {
+    // 优先寻找纯文本部分 (text/plain)，如果没有则找 HTML
+    let body = "";
+    let encoding = "";
+    let charset = "utf-8";
 
-    // 1. 提取 Body 部分（依然使用之前的边界切割）
-    const b64Match = raw.match(/Content-Transfer-Encoding: base64\r?\n\r?\n([\s\S]*?)(?=\r?\n--|$)/i);
-  
-    if (b64Match && b64Match[1]) {
-      try {
-        const binaryString = atob(b64Match[1].replace(/\s/g, ''));
-        const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
-      
-        // --- 关键修改：尝试自动识别编码 ---
-        // 检查邮件头里有没有说自己是 GBK 或 GB2312
-        const isGBK = raw.toLowerCase().includes('charset="gbk"') || raw.toLowerCase().includes('charset="gb2312"');
-      
-        const decoder = new TextDecoder(isGBK ? 'gbk' : 'utf-8');
-        cleanContent = decoder.decode(bytes);
-      } catch (e) {
-        cleanContent = "解码异常，原始数据：" + b64Match[1].slice(0, 50);
-      }
-    } else {
-      // 处理 quoted-printable 或纯文本格式
-      const parts = raw.split(/\r?\n\r?\n/);
-      cleanContent = parts.slice(1).join('\n').trim();
+    // 尝试匹配文本块
+    const partMatch = rawMail.match(/Content-Type: text\/plain;[\s\S]*?\r?\n\r?\n([\s\S]*?)(?=\r?\n--|$)/i);
     
+    if (partMatch) {
+      const headerArea = partMatch[0]; // 包含 Content-Transfer-Encoding 的头部
+      body = partMatch[1];
+      
+      // 提取编码方式
+      if (/encoding:.*base64/i.test(headerArea)) encoding = "base64";
+      else if (/encoding:.*quoted-printable/i.test(headerArea)) encoding = "qp";
+      
+      // 提取字符集
+      if (/charset=.*gb/i.test(headerArea)) charset = "gbk";
+    } else {
+      // 如果没找到标准块，尝试最原始的切分
+      body = rawMail.split(/\r?\n\r?\n/).slice(1).join('\n');
     }
 
-    // 2. 强力清洗（去掉 HTML、MIME 头和边界符）
-    cleanContent = cleanContent
-      .replace(/<style[\s\S]*?<\/style>/gi, '') // 额外去掉邮件里的 CSS
-      .replace(/<[^>]*>?/gm, '') 
-      .replace(/Content-Type:[\s\S]*?(?=\n\n|$)/gi, '')
-      .replace(/--_Part_.*|--=_Part_.*/g, '')
-      .slice(0, 500)
-      .trim();
+    // --- 2. 解码逻辑 ---
+    try {
+      if (encoding === "base64") {
+        const bin = atob(body.replace(/\s/g, ''));
+        return new TextDecoder(charset).decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+      } else if (encoding === "qp") {
+        // 解码 Quoted-Printable
+        const decodedQP = body.replace(/=\r?\n/g, '').replace(/=([0-9A-F]{2})/gi, (match, hex) => {
+          return String.fromCharCode(parseInt(hex, 16));
+        });
+        return new TextDecoder(charset).decode(Uint8Array.from(decodedQP, c => c.charCodeAt(0)));
+      }
+      return body; // 默认直接返回
+    } catch (e) {
+      return "解析失败: " + e.message;
+    }
+  }
+
+  let cleanContent = getMessageBody(raw);
+
+  // --- 3. 强力清洗 ---
+  cleanContent = cleanContent
+    .replace(/<[^>]*>?/gm, '') // 删掉 HTML 标签
+    .replace(/Content-Type:[\s\S]*?(?=\n\n|$)/gi, '') // 删掉残余 Header
+    .replace(/--_Part_.*|--=_Part_.*/g, '') // 删掉边界符
+    .slice(0, 500)
+    .trim();
 
     // 判断逻辑
     const isSpecial = subject.includes("[+]");
