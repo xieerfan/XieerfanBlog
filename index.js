@@ -159,7 +159,7 @@ export default {
             },
             body: JSON.stringify({
               from: "ArchBlog Bot <bot@xieerfan.com>",
-              to: ["your-email@example.com"], // 这里写收件人地址
+              to: ["zhujierui6688@163.com"], // 这里写收件人地址
               subject: `[DH 激活] 自动同步附件: ${lastMsg.subject}`,
               html: `<p>检测到 DH 接口调用。已从 R2 提取最新附件并同步。</p><p><strong>内容:</strong> ${lastMsg.content}</p>`,
               attachments: attachments // 注入附件
