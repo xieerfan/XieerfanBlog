@@ -132,24 +132,37 @@ export default {
   },
 
   // --- 邮件处理函数：自动留言板逻辑 ---
-async email(message, env) {
+  async email(message, env) {
     const sender = message.from;
     const subject = message.headers.get("subject") || "无主题";
-    
-    // --- 重点：只提取真正的邮件正文 ---
-    // 我们可以通过 headers 拿到一部分，但正文需要处理 message.raw
     const raw = await new Response(message.raw).text();
-    
-    // 简单的解析逻辑：
-    // 邮件头和正文通常由两个换行符 \r\n\r\n 分开
-    // 我们只需要最后一部分
-    const parts = raw.split(/\r?\n\r?\n/);
-    let cleanContent = parts.slice(1).join('\n\n').trim();
 
-    // 如果邮件是 HTML 格式，去掉标签，并防止存入过长的垃圾信息
+    let cleanContent = "";
+
+    // 1. 尝试寻找 Base64 编码的正文区域
+    // 匹配在 Base64 声明之后，直到下一个边界符之前的内容
+    const b64Match = raw.match(/Content-Transfer-Encoding: base64\r?\n\r?\n([\s\S]*?)(?=\r?\n--|$)/i);
+  
+    if (b64Match && b64Match[1]) {
+      try {
+        // 解码 Base64 (处理掉空格和换行)
+        const decoded = atob(b64Match[1].replace(/\s/g, ''));
+        // 将二进制字符串转回 UTF-8 字符串（解决中文乱码）
+        cleanContent = new TextDecoder().decode(Uint8Array.from(decoded, c => c.charCodeAt(0)));
+      } catch (e) {
+        cleanContent = "解码失败: " + b64Match[1].slice(0, 50);
+      }
+    } else {
+      // 2. 如果不是 Base64，尝试用之前的切分逻辑
+      const parts = raw.split(/\r?\n\r?\n/);
+      cleanContent = parts.slice(1).join('\n').trim();
+    }
+
+    // 3. 最后的强力清洗
     cleanContent = cleanContent
-      .replace(/<[^>]*>?/gm, '') // 去掉 HTML 标签
-      .replace(/Content-Type:.*|Content-Transfer-Encoding:.*/gi, '') // 去掉残余的 MIME 头
+      .replace(/<[^>]*>?/gm, '') // 去掉 HTML
+      .replace(/Content-Type:[\s\S]*?(?=\n\n|$)/gi, '') // 去掉残余 MIME 头
+      .replace(/--_Part_.*|--=_Part_.*/g, '') // 去掉边界符
       .slice(0, 500)
       .trim();
 
