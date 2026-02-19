@@ -136,29 +136,32 @@ export default {
 
   // --- 新增：邮件处理逻辑 ---
   async email(message, env) {
-    const subject = message.headers.get("subject") || "无主题邮件";
-    const from = message.from;
-    const to = message.to;
+    const fromEmail = message.from; // 对方的邮箱
+    const subject = message.headers.get("subject") || "无主题";
 
-    // 拼一个更帅的 TG 消息
-    const tgMessage = 
-      `📧 *【xieerfan.com】收到新邮件*\n` +
-      `--------------------------\n` +
-      `👤 *发件人:* ${from}\n` +
-      `🎯 *收件人:* ${to}\n` +
-      `📝 *主题:* ${subject}\n` +
-      `--------------------------\n` +
-      `💡 _提示: 详细内容已转发至你的私人邮箱_`;
-
-    // 调用 Telegram Bot API
+    // 1. 先发 TG（你原来的逻辑）
     await fetch(`https://api.telegram.org/bot${env.TG_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+        body: JSON.stringify({
         chat_id: env.TG_CHAT_ID,
-        text: tgMessage,
-        parse_mode: "Markdown"
+        text: `📧 收到 ${fromEmail} 的邮件，正在自动回信...`
       })
+    });
+
+    // 2. 调用 Resend API 给对方回信
+    await fetch("https://api.resending.com/emails", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.RESEND_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "ArchBlog <bot@xieerfan.com>", // 这里写你的域名地址
+        to: [fromEmail],
+        subject: `Re: ${subject}`,
+        html: `<strong>你好！</strong><br>我是谢尔凡的 Bot，你的邮件已收到并转发到他的 Telegram 了喵！`,
+      }),
     });
   }
 };
