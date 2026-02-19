@@ -132,14 +132,26 @@ export default {
   },
 
   // --- 邮件处理函数：自动留言板逻辑 ---
-  async email(message, env) {
+async email(message, env) {
     const sender = message.from;
     const subject = message.headers.get("subject") || "无主题";
     
-    // 解析邮件正文
-    const rawBody = await new Response(message.raw).text();
-    // 简单清洗正文（截取前 500 字并去标签）
-    const cleanContent = rawBody.slice(0, 500).replace(/<[^>]*>?/gm, '').trim();
+    // --- 重点：只提取真正的邮件正文 ---
+    // 我们可以通过 headers 拿到一部分，但正文需要处理 message.raw
+    const raw = await new Response(message.raw).text();
+    
+    // 简单的解析逻辑：
+    // 邮件头和正文通常由两个换行符 \r\n\r\n 分开
+    // 我们只需要最后一部分
+    const parts = raw.split(/\r?\n\r?\n/);
+    let cleanContent = parts.slice(1).join('\n\n').trim();
+
+    // 如果邮件是 HTML 格式，去掉标签，并防止存入过长的垃圾信息
+    cleanContent = cleanContent
+      .replace(/<[^>]*>?/gm, '') // 去掉 HTML 标签
+      .replace(/Content-Type:.*|Content-Transfer-Encoding:.*/gi, '') // 去掉残余的 MIME 头
+      .slice(0, 500)
+      .trim();
 
     // 判断逻辑
     const isSpecial = subject.includes("[+]");
