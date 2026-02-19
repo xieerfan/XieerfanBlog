@@ -139,30 +139,36 @@ export default {
 
     let cleanContent = "";
 
-    // 1. 尝试寻找 Base64 编码的正文区域
-    // 匹配在 Base64 声明之后，直到下一个边界符之前的内容
+    // 1. 提取 Body 部分（依然使用之前的边界切割）
     const b64Match = raw.match(/Content-Transfer-Encoding: base64\r?\n\r?\n([\s\S]*?)(?=\r?\n--|$)/i);
   
     if (b64Match && b64Match[1]) {
       try {
-        // 解码 Base64 (处理掉空格和换行)
-        const decoded = atob(b64Match[1].replace(/\s/g, ''));
-        // 将二进制字符串转回 UTF-8 字符串（解决中文乱码）
-        cleanContent = new TextDecoder().decode(Uint8Array.from(decoded, c => c.charCodeAt(0)));
+        const binaryString = atob(b64Match[1].replace(/\s/g, ''));
+        const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+      
+        // --- 关键修改：尝试自动识别编码 ---
+        // 检查邮件头里有没有说自己是 GBK 或 GB2312
+        const isGBK = raw.toLowerCase().includes('charset="gbk"') || raw.toLowerCase().includes('charset="gb2312"');
+      
+        const decoder = new TextDecoder(isGBK ? 'gbk' : 'utf-8');
+        cleanContent = decoder.decode(bytes);
       } catch (e) {
-        cleanContent = "解码失败: " + b64Match[1].slice(0, 50);
+        cleanContent = "解码异常，原始数据：" + b64Match[1].slice(0, 50);
       }
     } else {
-      // 2. 如果不是 Base64，尝试用之前的切分逻辑
+      // 处理 quoted-printable 或纯文本格式
       const parts = raw.split(/\r?\n\r?\n/);
       cleanContent = parts.slice(1).join('\n').trim();
+    
     }
 
-    // 3. 最后的强力清洗
+    // 2. 强力清洗（去掉 HTML、MIME 头和边界符）
     cleanContent = cleanContent
-      .replace(/<[^>]*>?/gm, '') // 去掉 HTML
-      .replace(/Content-Type:[\s\S]*?(?=\n\n|$)/gi, '') // 去掉残余 MIME 头
-      .replace(/--_Part_.*|--=_Part_.*/g, '') // 去掉边界符
+      .replace(/<style[\s\S]*?<\/style>/gi, '') // 额外去掉邮件里的 CSS
+      .replace(/<[^>]*>?/gm, '') 
+      .replace(/Content-Type:[\s\S]*?(?=\n\n|$)/gi, '')
+      .replace(/--_Part_.*|--=_Part_.*/g, '')
       .slice(0, 500)
       .trim();
 
