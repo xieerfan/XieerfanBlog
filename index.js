@@ -134,34 +134,57 @@ export default {
     }
   },
 
-  // --- 新增：邮件处理逻辑 ---
+// 2. 核心邮件处理函数
   async email(message, env) {
-    const fromEmail = message.from; // 对方的邮箱
+    const sender = message.from;
     const subject = message.headers.get("subject") || "无主题";
 
-    // 1. 先发 TG（你原来的逻辑）
+    // --- 第一步：推送 Telegram 告知你有新邮件 ---
     await fetch(`https://api.telegram.org/bot${env.TG_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      body: JSON.stringify({
         chat_id: env.TG_CHAT_ID,
-        text: `📧 收到 ${fromEmail} 的邮件，正在自动回信...`
+        text: `📧 *收到新邮件*\n👤 发件人: ${sender}\n📝 主题: ${subject}\n\n🤖 _已自动回信告知对方。_`,
+        parse_mode: "Markdown"
       })
     });
 
-    // 2. 调用 Resend API 给对方回信
-    await fetch("https://api.resending.com/emails", {
+    // --- 第二步：调用 Resend 自动回信 ---
+    const resendBody = {
+      from: "ArchBlog Bot <bot@xieerfan.com>", // 现在你可以自信地用自己的域名了
+      to: [sender],
+      subject: `Re: ${subject}`,
+      html: `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 20px auto; border: 1px solid #eee; border-radius: 10px; padding: 20px;">
+          <h2 style="color: #2563eb;">你好喵！👋</h2>
+          <p>我是 <strong>谢尔凡的博客助手</strong>。</p>
+          <p>感谢你来信关于 <strong>“${subject}”</strong> 的内容。我已经把这封信同步给博主了。</p>
+          <p>由于他可能正在：
+            <ul style="color: #666;">
+              <li>折腾 Arch Linux 配置</li>
+              <li>在 D1 数据库里敲 SQL</li>
+              <li>单纯地在睡觉...</li>
+            </ul>
+          请耐心等待他的亲自回复哦！</p>
+          <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+          <p style="font-size: 12px; color: #999;">本邮件由 Cloudflare Email Workers + Resend 自动触发发送。</p>
+        </div>
+      `
+    };
+
+    const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${env.RESEND_KEY}`,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        from: "ArchBlog <bot@xieerfan.com>", // 这里写你的域名地址
-        to: [fromEmail],
-        subject: `Re: ${subject}`,
-        html: `<strong>你好！</strong><br>我是谢尔凡的 Bot，你的邮件已收到并转发到他的 Telegram 了喵！`,
-      }),
+      body: JSON.stringify(resendBody)
     });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error("回信失败:", errorData);
+    }
   }
 };
