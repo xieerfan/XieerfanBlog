@@ -24,11 +24,6 @@ const routes = [
     path: '/contact', 
     name: 'Contact',
     component: () => import('../views/Contact.vue') 
-  },
-  { 
-    path: '/messages', // 这是咱们新做的邮件留言板
-    name: 'Messages',
-    component: () => import('../views/MessageBoard.vue') 
   }
 ]
 

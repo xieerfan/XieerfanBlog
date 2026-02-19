@@ -124,6 +124,63 @@ export default {
         `).all();
         return Response.json(results, { headers: corsHeaders });
       }
+
+      // --- 11. 自动化：GitHub PR + 发送带附件的邮件 (Portal DH) ---
+      if (pathname === "/api/dh") {
+        const token = url.searchParams.get("token");
+        // 从环境变量读取 token 校验
+        if (token !== env.DH_TOKEN) {
+          return new Response("Forbidden: Invalid Token", { status: 403, headers: corsHeaders });
+        }
+
+        try {
+
+          // B. 从 R2 获取 ZIP 附件
+          // 桶名已经在绑定中定义为 env.MY_R2，路径锁定为 Xieerfan.zip
+          const zipObject = await env.MY_R2.get("Xieerfan.zip");
+          let attachments = [];
+          
+          if (zipObject) {
+            const zipBuffer = await zipObject.arrayBuffer();
+            // 将二进制转为 Base64
+            const base64Content = btoa(String.fromCharCode(...new Uint8Array(zipBuffer)));
+            attachments.push({
+              filename: "Xieerfan.zip",
+              content: base64Content
+            });
+          }
+
+          // C. 发送带附件的邮件 (Resend)
+          const emailRes = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${env.RESEND_KEY}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              from: "ArchBlog Bot <bot@xieerfan.com>",
+              to: ["your-email@example.com"], // 这里写收件人地址
+              subject: `[DH 激活] 自动同步附件: ${lastMsg.subject}`,
+              html: `<p>检测到 DH 接口调用。已从 R2 提取最新附件并同步。</p><p><strong>内容:</strong> ${lastMsg.content}</p>`,
+              attachments: attachments // 注入附件
+            })
+          });
+
+          // D. GitHub 自动 PR 逻辑 (之前讨论的逻辑)
+          // 1. 同步 Fork -> 2. 切分支 -> 3. 提交文件 -> 4. 提 PR
+          // 这里为了篇幅省略具体 fetch，建议复用之前给你的 GitHub API 部分
+
+          const emailStatus = await emailRes.json();
+          return Response.json({ 
+            success: true, 
+            message: "邮件已发送并附带 ZIP", 
+            resend_id: emailStatus.id 
+          }, { headers: corsHeaders });
+
+        } catch (err) {
+          return new Response("DH Error: " + err.message, { status: 500, headers: corsHeaders });
+        }
+      }
       return new Response("Arch Blog API Hub is Running!", { headers: corsHeaders });
 
     } catch (err) {

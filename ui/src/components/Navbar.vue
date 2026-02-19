@@ -29,7 +29,6 @@ const handleInput = (e) => {
         <router-link to="/" class="tab-item" active-class="active">主页</router-link>
         <router-link to="/wiki" class="tab-item" active-class="active">Wiki</router-link>
         <router-link to="/contact" class="tab-item" active-class="active">骚扰作者</router-link>
-        <router-link to="/messages" class="tab-item" active-class="active">留言板</router-link>
       </div>
       
       <div class="search-wrapper">
