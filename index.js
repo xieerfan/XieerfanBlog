@@ -95,11 +95,9 @@ export default {
         return Response.json(results, { headers: corsHeaders });
       }
 
-      // --- 9. Telegram 消息推送接口 (NEW!) ---
+      // --- 9. Telegram 消息推送接口 ---
       if (pathname === "/api/notify" && request.method === "POST") {
         const data = await request.json();
-        
-        // 构建发送给 TG 的文本
         let message = `🚀 *收到新传送门讯息*\n\n`;
         message += `*分类:* ${data.type}\n`;
         message += `*联系方式:* ${data.contact}\n`;
@@ -108,83 +106,105 @@ export default {
         }
         message += `\n*内容详情:*\n${data.content}`;
 
-        const tgUrl = `https://api.telegram.org/bot${env.TG_TOKEN}/sendMessage`;
-        
-        const tgRes = await fetch(tgUrl, {
+        const tgRes = await fetch(`https://api.telegram.org/bot${env.TG_TOKEN}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            chat_id: env.TG_CHAT_ID,
-            text: message,
-            parse_mode: "Markdown"
-          })
+          body: JSON.stringify({ chat_id: env.TG_CHAT_ID, text: message, parse_mode: "Markdown" })
         });
-
-        if (tgRes.ok) {
-          return Response.json({ success: true }, { headers: corsHeaders });
-        } else {
-          return Response.json({ success: false, error: "TG API Error" }, { status: 500, headers: corsHeaders });
-        }
+        return Response.json({ success: tgRes.ok }, { headers: corsHeaders });
       }
 
-      return new Response("Arch Blog API is Running!", { headers: corsHeaders });
+      /// --- 10. D1：邮件留言板读取接口 (Portal Hub) ---
+      if (pathname === "/api/messages") {
+        const { results } = await env.BLOG_DB.prepare(`
+          SELECT nickname, subject, content, date 
+          FROM mail_messages 
+          ORDER BY id DESC 
+          LIMIT 50
+        `).all();
+        return Response.json(results, { headers: corsHeaders });
+      }
+      return new Response("Arch Blog API Hub is Running!", { headers: corsHeaders });
 
     } catch (err) {
       return new Response(err.stack, { status: 500, headers: corsHeaders });
     }
   },
 
-// 2. 核心邮件处理函数
+  // --- 邮件处理函数：自动留言板逻辑 ---
   async email(message, env) {
     const sender = message.from;
     const subject = message.headers.get("subject") || "无主题";
+    
+    // 解析邮件正文
+    const rawBody = await new Response(message.raw).text();
+    // 简单清洗正文（截取前 500 字并去标签）
+    const cleanContent = rawBody.slice(0, 500).replace(/<[^>]*>?/gm, '').trim();
 
-    // --- 第一步：推送 Telegram 告知你有新邮件 ---
+    // 判断逻辑
+    const isSpecial = subject.includes("[+]");
+    let nickname = "匿名小可爱";
+
+    // 如果包含 [+]，尝试提取 [xxx] 里的昵称
+    if (isSpecial) {
+      const match = subject.match(/\[\+\]\s*\[(.*?)\]/);
+      if (match && match[1]) {
+        nickname = match[1];
+      }
+      
+      // 写入 D1 数据库
+      try {
+        await env.BLOG_DB.prepare(
+          "INSERT INTO mail_messages (nickname, subject, content, date) VALUES (?, ?, ?, ?)"
+        ).bind(nickname, subject, cleanContent, new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })).run();
+      } catch (e) {
+        console.error("D1 Insert Error:", e);
+      }
+    }
+
+    // --- 第一步：推送 Telegram ---
+    const icon = isSpecial ? "📝" : "📧";
+    const tgNotice = isSpecial ? `*【留言板新入驻: ${nickname}】*` : `*【普通来信】*`;
+    
     await fetch(`https://api.telegram.org/bot${env.TG_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: env.TG_CHAT_ID,
-        text: `📧 *收到新邮件*\n👤 发件人: ${sender}\n📝 主题: ${subject}\n\n🤖 _已自动回信告知对方。_`,
+        text: `${icon} ${tgNotice}\n👤 来自: ${sender}\n📝 主题: ${subject}\n\n🤖 _已同步至 D1 数据库并自动回信。_`,
         parse_mode: "Markdown"
       })
     });
 
-    // --- 第二步：调用 Resend 自动回信 ---
-    const resendBody = {
-      from: "ArchBlog Bot <bot@xieerfan.com>", // 现在你可以自信地用自己的域名了
-      to: [sender],
-      subject: `Re: ${subject}`,
-      html: `
-        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 20px auto; border: 1px solid #eee; border-radius: 10px; padding: 20px;">
-          <h2 style="color: #2563eb;">你好喵！👋</h2>
-          <p>我是 <strong>谢尔凡的博客助手</strong>。</p>
-          <p>感谢你来信关于 <strong>“${subject}”</strong> 的内容。我已经把这封信同步给博主了。</p>
-          <p>由于他可能正在：
-            <ul style="color: #666;">
-              <li>折腾 Arch Linux 配置</li>
-              <li>在 D1 数据库里敲 SQL</li>
-              <li>单纯地在睡觉...</li>
-            </ul>
-          请耐心等待他的亲自回复哦！</p>
-          <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="font-size: 12px; color: #999;">本邮件由 Cloudflare Email Workers + Resend 自动触发发送。</p>
-        </div>
-      `
-    };
+    // --- 第二步：准备回信 HTML ---
+    const replyHtml = isSpecial ? `
+      <div style="font-family: sans-serif; max-width: 600px; border: 2px solid #2563eb; border-radius: 10px; padding: 20px;">
+        <h2 style="color: #2563eb;">留言成功！✨</h2>
+        <p>你好 <strong>${nickname}</strong>，感谢你的留言。</p>
+        <p>你的足迹已记录在 <strong>ArchBlog 留言板</strong> 数据库中。</p>
+        <p>博主看到后会通过传送门给你回电喵~</p>
+      </div>
+    ` : `
+      <div style="font-family: sans-serif; max-width: 600px; border: 1px solid #eee; border-radius: 10px; padding: 20px;">
+        <h2 style="color: #2563eb;">你好喵！👋</h2>
+        <p>我是 <strong>Xieerfan 博客助手</strong>。已收到关于“${subject}”的来信。</p>
+        <p>博主由于正在折腾代码或打游戏（或者嗝屁了），请耐心等待回复~</p>
+      </div>
+    `;
 
-    const response = await fetch("https://api.resend.com/emails", {
+    // --- 第三步：发送回信 ---
+    await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${env.RESEND_KEY}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(resendBody)
+      body: JSON.stringify({
+        from: "ArchBlog Bot <bot@xieerfan.com>",
+        to: [sender],
+        subject: isSpecial ? `[Board] Re: ${subject}` : `Re: ${subject}`,
+        html: replyHtml
+      })
     });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error("回信失败:", errorData);
-    }
   }
 };
