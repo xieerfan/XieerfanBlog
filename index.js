@@ -129,7 +129,7 @@ export default {
       if (pathname === "/api/dh") {
         const token = url.searchParams.get("token");
         
-        // 1. 校验 Token (从 CF Env 读取)
+        // 1. 校验 Token
         if (token !== env.DH_TOKEN) {
           return new Response("Forbidden: Invalid Token", { status: 403, headers: corsHeaders });
         }
@@ -145,7 +145,15 @@ export default {
           const zipBuffer = await zipObject.arrayBuffer();
           const base64Content = btoa(String.fromCharCode(...new Uint8Array(zipBuffer)));
 
-          // 4. 调用 Resend 发送邮件
+          // 4. 获取收件人地址并强制转换为字符串
+          // 增加一个简单的逻辑判断，防止变量缺失
+          const recipient = String(env.MY_EMAIL || "").trim();
+          
+          if (!recipient || !recipient.includes("@")) {
+            return new Response("Error: MY_EMAIL variable is not set correctly in CF Env", { status: 500, headers: corsHeaders });
+          }
+
+          // 5. 调用 Resend 发送邮件
           const resendRes = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: {
@@ -154,12 +162,12 @@ export default {
             },
             body: JSON.stringify({
               from: "ArchBlog Bot <bot@xieerfan.com>",
-              to: [env.MY_EMAIL], // 使用你要求的变量 MY_EMAIL
+              to: recipient, // 确保这里是一个有效的字符串
               subject: `[DH 激活] 附件传送: Xieerfan.zip`,
               html: `
                 <div style="font-family: sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
                   <h2 style="color: #2563eb;">📦 附件提取成功</h2>
-                  <p>DH 接口已触发，已从 R2 存储桶完成自动化提取。</p>
+                  <p>DH 接口已触发，已从 R2 存储桶完成自动化提取并发送至您的预设邮箱。</p>
                   <hr/>
                   <p style="font-size: 12px; color: #666;">触发时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
                 </div>
@@ -176,9 +184,10 @@ export default {
           const result = await resendRes.json();
 
           if (resendRes.ok) {
-            return Response.json({ success: true, message: "邮件已发送喵！", id: result.id }, { headers: corsHeaders });
+            return Response.json({ success: true, message: "邮件已发送！", id: result.id }, { headers: corsHeaders });
           } else {
-            throw new Error(result.message || "Resend API Error");
+            // 如果 Resend 返回错误信息，将其抛出
+            throw new Error(JSON.stringify(result));
           }
 
         } catch (err) {
