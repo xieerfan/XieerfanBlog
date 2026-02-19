@@ -132,5 +132,33 @@ export default {
     } catch (err) {
       return new Response(err.stack, { status: 500, headers: corsHeaders });
     }
+  },
+
+  // --- 新增：邮件处理逻辑 ---
+  async email(message, env) {
+    const subject = message.headers.get("subject") || "无主题邮件";
+    const from = message.from;
+    const to = message.to;
+
+    // 拼一个更帅的 TG 消息
+    const tgMessage = 
+      `📧 *【xieerfan.com】收到新邮件*\n` +
+      `--------------------------\n` +
+      `👤 *发件人:* ${from}\n` +
+      `🎯 *收件人:* ${to}\n` +
+      `📝 *主题:* ${subject}\n` +
+      `--------------------------\n` +
+      `💡 _提示: 详细内容已转发至你的私人邮箱_`;
+
+    // 调用 Telegram Bot API
+    await fetch(`https://api.telegram.org/bot${env.TG_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: env.TG_CHAT_ID,
+        text: tgMessage,
+        parse_mode: "Markdown"
+      })
+    });
   }
 };
