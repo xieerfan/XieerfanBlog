@@ -141,19 +141,20 @@ export default {
             return new Response("Error: Xieerfan.zip not found in R2", { status: 404, headers: corsHeaders });
           }
 
-          // 3. 将 ZIP 转为 Base64 格式
+          // 3. 将 ZIP 转为 Base64
           const zipBuffer = await zipObject.arrayBuffer();
           const base64Content = btoa(String.fromCharCode(...new Uint8Array(zipBuffer)));
 
-          // 4. 获取收件人地址并强制转换为字符串
-          // 增加一个简单的逻辑判断，防止变量缺失
+          // 4. 获取变量：收件人和正文内容
           const recipient = String(env.MY_EMAIL || "").trim();
+          // 如果环境变量里没写内容，就给个默认文字防止空白
+          const htmlContent = String(env.DH_HTML_CONTENT || "<h2>DH 自动传送门</h2><p>附件已成功从 R2 提取并发送。</p>").trim();
           
           if (!recipient || !recipient.includes("@")) {
-            return new Response("Error: MY_EMAIL variable is not set correctly in CF Env", { status: 500, headers: corsHeaders });
+            return new Response("Error: MY_EMAIL is not set in CF Env", { status: 500, headers: corsHeaders });
           }
 
-          // 5. 调用 Resend 发送邮件
+          // 5. 调用 Resend 发送
           const resendRes = await fetch("https://api.resend.com/emails", {
             method: "POST",
             headers: {
@@ -162,16 +163,9 @@ export default {
             },
             body: JSON.stringify({
               from: "ArchBlog Bot <bot@xieerfan.com>",
-              to: recipient, // 确保这里是一个有效的字符串
+              to: recipient, // 使用变量
               subject: `[DH 激活] 附件传送: Xieerfan.zip`,
-              html: `
-                <div style="font-family: sans-serif; border: 1px solid #eee; padding: 20px; border-radius: 8px;">
-                  <h2 style="color: #2563eb;">📦 附件提取成功</h2>
-                  <p>DH 接口已触发，已从 R2 存储桶完成自动化提取并发送至您的预设邮箱。</p>
-                  <hr/>
-                  <p style="font-size: 12px; color: #666;">触发时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
-                </div>
-              `,
+              html: htmlContent, // 使用变量
               attachments: [
                 {
                   filename: "Xieerfan.zip",
@@ -184,9 +178,12 @@ export default {
           const result = await resendRes.json();
 
           if (resendRes.ok) {
-            return Response.json({ success: true, message: "邮件已发送！", id: result.id }, { headers: corsHeaders });
+            return Response.json({ 
+              success: true, 
+              to: recipient,
+              message: "已读取环境变量并完成发送！" 
+            }, { headers: corsHeaders });
           } else {
-            // 如果 Resend 返回错误信息，将其抛出
             throw new Error(JSON.stringify(result));
           }
 
